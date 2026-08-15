@@ -33,9 +33,9 @@ GIT_ENV = {"GIT_AUTHOR_NAME": "coding-agent", "GIT_AUTHOR_EMAIL": "agent@codecom
 class Project:
     """산출물 하나. 워크스페이스 아래의 독립된 git 저장소다."""
 
-    def __init__(self, name: str = "todo-app"):
+    def __init__(self, name: str = "todo-app", path: str | None = None):
         self.name = name
-        self.path = os.path.join(WORKSPACE, name)
+        self.path = path or os.path.join(WORKSPACE, name)
 
     # ── 파일 ────────────────────────────────────────────────────────
     def write_file(self, relpath: str, content: str) -> str:
@@ -107,6 +107,26 @@ class Project:
 
     def graph(self, limit: int = 20) -> str:
         return self.git("log", "--graph", "--oneline", "--all", f"-{limit}")[1]
+
+    # ── worktree: 병렬로 짜려면 작업 트리가 따로 있어야 한다 (v0.2) ──
+    #
+    # 브랜치만 나누는 것으로는 부족하다. 셋이 한 디렉터리에서 동시에
+    # checkout 하면 서로의 파일을 밟는다. git worktree는 저장소 하나에
+    # 작업 디렉터리를 여럿 붙이는 기능이고, 정확히 이 문제를 위해 있다.
+
+    def add_worktree(self, role: str, branch: str) -> "Project":
+        path = os.path.join(WORKSPACE, ".worktrees", f"{self.name}-{role}")
+        if os.path.exists(path):
+            self.remove_worktree(role)
+        self.git("worktree", "add", "-q", "-b", branch, path, "main")
+        return Project(self.name, path=path)
+
+    def remove_worktree(self, role: str) -> None:
+        path = os.path.join(WORKSPACE, ".worktrees", f"{self.name}-{role}")
+        self.git("worktree", "remove", "--force", path)
+        if os.path.exists(path):
+            shutil.rmtree(path, ignore_errors=True)
+        self.git("worktree", "prune")
 
     # ── 검증 ────────────────────────────────────────────────────────
     def run_tests(self) -> tuple[bool, str]:
