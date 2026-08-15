@@ -18,6 +18,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -25,6 +26,10 @@ import urllib.request
 from agent import scaffold
 
 WORKSPACE = os.environ.get("WORKSPACE", "/workspace")
+
+# git 명령은 줄을 세운다. 병렬로 벌고 싶은 것은 모델 호출 시간이지 git이
+# 아니고, 같은 저장소에 동시에 worktree를 붙였다 떼는 것은 값싼 사고다.
+GIT_LOCK = threading.Lock()
 ARTIFACT_URL = f"http://host.docker.internal:{scaffold.PORT}"
 GIT_ENV = {"GIT_AUTHOR_NAME": "coding-agent", "GIT_AUTHOR_EMAIL": "agent@codecompose.net",
            "GIT_COMMITTER_NAME": "coding-agent", "GIT_COMMITTER_EMAIL": "agent@codecompose.net"}
@@ -61,15 +66,29 @@ class Project:
         return sorted(found)
 
     # ── git ─────────────────────────────────────────────────────────
-    def _run(self, command: list[str], timeout: int = 300) -> tuple[int, str]:
-        # 첫 실행에는 프로젝트 디렉터리가 아직 없다 (docker_down이 먼저 불린다)
-        cwd = self.path if os.path.isdir(self.path) else WORKSPACE
+    def _run(self, command: list[str], timeout: int = 300,
+             allow_missing: bool = False) -> tuple[int, str]:
+        """프로젝트 디렉터리에서 명령을 돌린다.
+
+        디렉터리가 없으면 조용히 다른 곳에서 돌리지 않는다. 그렇게 하면
+        "not a git repository" 같은 엉뚱한 메시지가 진짜 원인을 덮는다.
+        디렉터리가 없어도 되는 명령(docker_down)만 예외로 둔다.
+        """
+        if not os.path.isdir(self.path):
+            if not allow_missing:
+                return 1, f"프로젝트 디렉터리가 없습니다: {self.path}"
+            return self._run_in(WORKSPACE, command, timeout)
+        return self._run_in(self.path, command, timeout)
+
+    @staticmethod
+    def _run_in(cwd: str, command: list[str], timeout: int) -> tuple[int, str]:
         result = subprocess.run(command, cwd=cwd, capture_output=True, text=True,
                                 timeout=timeout, env={**os.environ, **GIT_ENV})
         return result.returncode, (result.stdout + result.stderr).strip()
 
     def git(self, *args: str, timeout: int = 120) -> tuple[int, str]:
-        return self._run(["git", *args], timeout=timeout)
+        with GIT_LOCK:
+            return self._run(["git", *args], timeout=timeout)
 
     def reset(self) -> None:
         """빈 자리에서 시작한다. 골격을 놓고 main에 커밋해 둔다."""
@@ -118,7 +137,9 @@ class Project:
         path = os.path.join(WORKSPACE, ".worktrees", f"{self.name}-{role}")
         if os.path.exists(path):
             self.remove_worktree(role)
-        self.git("worktree", "add", "-q", "-b", branch, path, "main")
+        code, out = self.git("worktree", "add", "-q", "-b", branch, path, "main")
+        if code != 0 or not os.path.isdir(path):
+            raise RuntimeError(f"worktree를 만들지 못했습니다 ({role}): {out[-300:]}")
         return Project(self.name, path=path)
 
     def remove_worktree(self, role: str) -> None:
@@ -156,7 +177,8 @@ class Project:
         return False, (out + "\n" + self.docker_logs())[-3000:]
 
     def docker_down(self) -> None:
-        self._run(["docker", "compose", "-p", self.name, "down", "-v"], timeout=300)
+        self._run(["docker", "compose", "-p", self.name, "down", "-v"],
+                  timeout=300, allow_missing=True)
 
     def docker_logs(self, tail: int = 60) -> str:
         return self._run(["docker", "compose", "-p", self.name, "logs", f"--tail={tail}"])[1]
