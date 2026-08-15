@@ -32,7 +32,7 @@ docker compose up --build  # app(8000) · ui(8501)
 | --- | --- |
 | v0.1 | worker 하나가 순차로 전부 작성 (동작하지만 느리다) |
 | v0.2 | 병렬화: Send로 worker 셋 동시 작업, 각자 git worktree에서 |
-| v0.3 | (예정) 비용 게이트 + 난이도별 모델 배정 |
+| v0.3 | 비용 게이트 + 난이도별 모델 배정: 상한을 넘으면 사람에게 묻는다 |
 | v0.4 | (예정) 복구 루프: 수정 한도 초과 시 재계획 |
 | v1.0 | (예정) 대시보드 완성과 전체 실행 |
 
@@ -41,6 +41,7 @@ docker compose up --build  # app(8000) · ui(8501)
 ```sh
 docker compose exec app python demos/sequential_run.py   # v0.1: 순차 실행과 소요 시간
 docker compose exec app python demos/parallel_run.py     # v0.2: 순차 vs 병렬 타임라인
+docker compose exec app python demos/cost_gate.py        # v0.3: 상한·승인·중단 세 경우
 ```
 
 ## 무엇을 에이전트가 쓰고, 무엇을 골격이 주는가
