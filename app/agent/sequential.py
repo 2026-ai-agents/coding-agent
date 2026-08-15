@@ -82,6 +82,9 @@ class RunState(TypedDict):
     tested: bool
     served: bool
     approved: bool            # v0.3의 비용 게이트가 채운다
+    failure: str              # v0.4의 복구 루프가 읽는 실패 로그
+    fix_rounds: int
+    replans: int
     report: str
 
 
