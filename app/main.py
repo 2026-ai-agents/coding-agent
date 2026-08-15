@@ -17,7 +17,7 @@ from agent.workspace import Project
 
 SPEC_DIR = "/app/specs"
 
-app = FastAPI(title="coding-agent", version="0.3")
+app = FastAPI(title="coding-agent", version="0.4")
 _lock = threading.Lock()
 _thread: threading.Thread | None = None
 
