@@ -1,0 +1,8 @@
+# app 컨테이너에 설치되는 전부
+fastapi>=0.115,<1
+uvicorn>=0.34,<1
+langgraph>=0.6,<2
+litellm>=1.74,<2
+pydantic>=2.10,<3
+pytest>=8.3,<9
+httpx>=0.27,<1
