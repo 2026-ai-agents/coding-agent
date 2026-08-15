@@ -13,7 +13,8 @@ import streamlit as st
 APP_URL = os.environ.get("APP_URL", "http://localhost:8000")
 ARTIFACT_URL = "http://localhost:8080"
 
-STATUS_LABEL = {"idle": "대기", "running": "실행 중", "done": "완료", "failed": "실패"}
+STATUS_LABEL = {"idle": "대기", "running": "실행 중", "done": "완료", "failed": "실패",
+                "approval_needed": "승인 대기", "stopped": "중단됨"}
 
 st.set_page_config(page_title="coding-agent — 진행 대시보드", page_icon="🛠️", layout="wide")
 
@@ -27,10 +28,13 @@ with st.sidebar:
     mode = st.radio("배치", ["parallel", "sequential"],
                     format_func={"parallel": "병렬 (v0.2)",
                                  "sequential": "순차 (v0.1)"}.get)
+    budget = st.number_input("비용 상한 ($)", min_value=0.0, max_value=5.0,
+                             value=0.02, step=0.005, format="%.3f")
     started = st.button("에이전트 실행", type="primary", use_container_width=True,
                         disabled=state == "running")
     if started:
-        requests.post(f"{APP_URL}/run", json={"spec": spec, "mode": mode}, timeout=30)
+        requests.post(f"{APP_URL}/run",
+                      json={"spec": spec, "mode": mode, "budget_usd": budget}, timeout=30)
         st.rerun()
 
     if st.button("산출물 내리기", use_container_width=True):
@@ -48,8 +52,26 @@ left.metric("상태", STATUS_LABEL.get(state, state),
             {"parallel": "병렬", "sequential": "순차"}.get(status.get("mode", ""), ""))
 middle.metric("경과", f"{status.get('elapsed_s', 0)}초")
 cost = status.get("cost", {})
+estimate_total = status.get("estimate", {}).get("total_usd")
 right.metric("누적 비용", f"${cost.get('cost_usd', 0):.4f}",
-             f"{cost.get('calls', 0)}회 호출")
+             f"{cost.get('calls', 0)}회 호출"
+             + (f" · 추정 ${estimate_total:.4f}" if estimate_total else ""))
+
+if state == "approval_needed":
+    estimate = status.get("estimate", {})
+    st.warning(f"예상 비용 ${estimate.get('total_usd', 0):.4f}이 상한 "
+               f"${status.get('budget_usd', 0):.4f}을 넘습니다. 승인해야 시작합니다.")
+    st.table([{"역할": item["role"], "모델": item["model"].split("/")[-1],
+               "예상 출력": f"{item['out_tokens']:,} 토큰",
+               "예상 비용": f"${item['cost_usd']:.4f}"}
+              for item in estimate.get("per_task", [])])
+    approve, reject = st.columns(2)
+    if approve.button("승인하고 진행", type="primary", use_container_width=True):
+        requests.post(f"{APP_URL}/approve", json={"approved": True}, timeout=30)
+        st.rerun()
+    if reject.button("중단", use_container_width=True):
+        requests.post(f"{APP_URL}/approve", json={"approved": False}, timeout=30)
+        st.rerun()
 
 st.subheader("태스크")
 tasks = status.get("tasks", [])

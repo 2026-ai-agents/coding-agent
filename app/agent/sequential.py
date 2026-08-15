@@ -81,6 +81,7 @@ class RunState(TypedDict):
     merged: bool
     tested: bool
     served: bool
+    approved: bool            # v0.3의 비용 게이트가 채운다
     report: str
 
 
