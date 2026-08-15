@@ -17,7 +17,7 @@ from agent.workspace import Project
 
 SPEC_DIR = "/app/specs"
 
-app = FastAPI(title="coding-agent", version="0.2")
+app = FastAPI(title="coding-agent", version="0.3")
 _lock = threading.Lock()
 _thread: threading.Thread | None = None
 
@@ -25,6 +25,11 @@ _thread: threading.Thread | None = None
 class RunRequest(BaseModel):
     spec: str = "todo"
     mode: str = "parallel"      # parallel | sequential
+    budget_usd: float | None = None
+
+
+class ApproveRequest(BaseModel):
+    approved: bool
 
 
 @app.get("/health")
@@ -58,10 +63,25 @@ def run(body: RunRequest) -> dict:
         if _thread and _thread.is_alive():
             return {"started": False, "why": "이미 실행 중입니다"}
         spec = read_spec(body.spec)
-        runner = sequential.run if body.mode == "sequential" else parallel.run
-        _thread = threading.Thread(target=runner, args=(spec,), daemon=True)
+        if body.mode == "sequential":
+            target, kwargs = sequential.run, {}
+        else:
+            target, kwargs = parallel.run, {"budget_usd": body.budget_usd}
+        _thread = threading.Thread(target=target, args=(spec,), kwargs=kwargs, daemon=True)
         _thread.start()
     return {"started": True, "spec": body.spec, "mode": body.mode}
+
+
+@app.post("/approve")
+def approve(body: ApproveRequest) -> dict:
+    """비용 게이트 앞에 선 실행을 이어가거나 접는다."""
+    global _thread
+    with _lock:
+        if _thread and _thread.is_alive():
+            return {"ok": False, "why": "아직 실행 중입니다"}
+        _thread = threading.Thread(target=parallel.resume, args=(body.approved,), daemon=True)
+        _thread.start()
+    return {"ok": True, "approved": body.approved}
 
 
 @app.get("/status")
