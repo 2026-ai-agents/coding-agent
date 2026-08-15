@@ -1,0 +1,27 @@
+services:
+  app:
+    build: ./app
+    env_file: .env
+    environment:
+      # 컨테이너가 보는 경로와 도커 데몬이 보는 경로가 다르다. 파일은 /workspace에
+      # 쓰지만, docker build·compose에게는 호스트 경로를 알려 줘야 한다.
+      WORKSPACE: /workspace
+      HOST_WORKSPACE: ${PWD}/workspace
+    volumes:
+      - ./workspace:/workspace                    # 에이전트가 코드를 쓰는 곳
+      - ./specs:/app/specs:ro                     # SPEC은 호스트에서 고친다 (리빌드 없이)
+      - /var/run/docker.sock:/var/run/docker.sock # 산출물을 빌드·기동하기 위해
+    ports:
+      - "8000:8000"
+
+  ui:
+    build: ./ui
+    environment:
+      APP_URL: http://app:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      - app
+
+# 산출물(생성된 웹 앱)은 이 compose가 아니라 workspace/<프로젝트>/docker-compose.yml로
+# 따로 뜬다. 만드는 것과 만들어진 것을 섞지 않는다.
