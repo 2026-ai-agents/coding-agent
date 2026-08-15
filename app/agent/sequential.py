@@ -15,6 +15,7 @@ worker에게 준 도구는 `write_file` 하나뿐이다. 브랜치도 커밋도 
 
 import json
 import operator
+import threading
 import time
 from typing import Annotated, TypedDict
 
@@ -108,15 +109,19 @@ class Runner:
         self.started = time.time()
         self.status = {"state": "running", "mode": mode, "tasks": [], "events": [],
                        "cost": {}, "elapsed_s": 0}
+        # v0.2에서 worker 셋이 동시에 이 상태를 건드린다. 자물쇠 하나면 충분하다.
+        self.lock = threading.Lock()
 
     def publish(self, **changes) -> None:
-        self.status.update(changes)
-        self.status["cost"] = self.ledger.totals()
-        self.status["elapsed_s"] = round(time.time() - self.started, 1)
-        self.project.save_status(self.status)
+        with self.lock:
+            self.status.update(changes)
+            self.status["cost"] = self.ledger.totals()
+            self.status["elapsed_s"] = round(time.time() - self.started, 1)
+            self.project.save_status(self.status)
 
     def note(self, event: dict) -> None:
-        self.status["events"].append(event)
+        with self.lock:
+            self.status["events"].append(event)
         self.publish()
 
     def call(self, who: str, model: str, **kwargs):
@@ -148,11 +153,17 @@ def plan_tasks(runner: Runner, spec: str) -> list[dict]:
     return tasks
 
 
-def work_on(runner: Runner, task: dict, spec: str, model: str) -> dict:
-    """한 태스크: 브랜치를 만들고, 모델에게 파일을 쓰게 하고, 커밋한다."""
-    project = runner.project
+def work_on(runner: Runner, task: dict, spec: str, model: str,
+            project: Project | None = None) -> dict:
+    """한 태스크: 브랜치를 만들고, 모델에게 파일을 쓰게 하고, 커밋한다.
+
+    project를 따로 받으면 그곳에 쓴다. v0.2가 worktree를 넘겨 병렬로 짤 때
+    쓰는 자리이고, 넘기지 않으면 v0.1처럼 프로젝트 본체에서 작업한다.
+    """
     started = time.time()
-    project.branch(task["branch"])
+    if project is None:
+        project = runner.project
+        project.branch(task["branch"])
     runner.note(_event(task["role"], "브랜치", task["branch"]))
 
     messages = [{"role": "user", "content": WORKER_PROMPT.format(

@@ -24,10 +24,13 @@ state = status.get("state", "idle")
 with st.sidebar:
     st.subheader("실행")
     spec = st.selectbox("SPEC", health["specs"])
+    mode = st.radio("배치", ["parallel", "sequential"],
+                    format_func={"parallel": "병렬 (v0.2)",
+                                 "sequential": "순차 (v0.1)"}.get)
     started = st.button("에이전트 실행", type="primary", use_container_width=True,
                         disabled=state == "running")
     if started:
-        requests.post(f"{APP_URL}/run", json={"spec": spec}, timeout=30)
+        requests.post(f"{APP_URL}/run", json={"spec": spec, "mode": mode}, timeout=30)
         st.rerun()
 
     if st.button("산출물 내리기", use_container_width=True):
@@ -41,7 +44,8 @@ with st.sidebar:
 
 st.title("🛠️ coding-agent 진행 대시보드")
 left, middle, right = st.columns(3)
-left.metric("상태", STATUS_LABEL.get(state, state))
+left.metric("상태", STATUS_LABEL.get(state, state),
+            {"parallel": "병렬", "sequential": "순차"}.get(status.get("mode", ""), ""))
 middle.metric("경과", f"{status.get('elapsed_s', 0)}초")
 cost = status.get("cost", {})
 right.metric("누적 비용", f"${cost.get('cost_usd', 0):.4f}",
