@@ -138,7 +138,7 @@ def build_graph(runner: Runner, budget_usd: float | None = None,
         if replans:                         # 새 시도는 새 브랜치에서 (이력이 남는다)
             tasks = [{**task, "branch": f"{task['branch']}-r{replans + 1}"} for task in tasks]
             runner.note(_event("planner", "재계획", f"{replans + 1}번째 시도 · 새 브랜치"))
-        runner.publish(tasks=tasks, state="running")
+        runner.publish(tasks=tasks, state="running", replans=replans, fix_rounds=0)
         return {"tasks": tasks, "replans": replans, "fix_rounds": 0, "failure": "",
                 "events": [_event("planner", "태스크 분해", f"{len(tasks)}개 · 동시 시작")]}
 
@@ -195,6 +195,7 @@ def build_graph(runner: Runner, budget_usd: float | None = None,
     def fixer(state: RunState) -> dict:
         rounds = state.get("fix_rounds", 0) + 1
         written, sha = fix_once(runner, state["failure"])
+        runner.publish(fix_rounds=rounds)          # 대시보드가 복구 횟수를 읽는다
         runner.note(_event("fixer", f"수정 {rounds}회차",
                            f"{', '.join(written) or '고치지 못했다'} {sha}"))
         return {"fix_rounds": rounds}

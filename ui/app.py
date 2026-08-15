@@ -1,20 +1,29 @@
 """진행 대시보드 — 에이전트가 무엇을 하고 있는지 보는 화면.
 
-코딩 에이전트는 오래 돌고 돈을 쓴다. 그래서 보여 줄 것이 셋이다.
-**어디까지 왔는가**(태스크), **무엇을 했는가**(이벤트와 git 이력),
-**얼마 썼는가**(비용). 산출물은 이 화면이 아니라 8080 포트에서 따로 뜬다.
+코딩 에이전트는 오래 돌고 돈을 쓴다. 그래서 보여 줄 것이 넷이다.
+
+  · 어디까지 왔는가   태스크 표와 구간
+  · 무엇을 했는가     이벤트와 git 이력 (작업 기록은 곧 git이다)
+  · 얼마 썼는가       추정과 실측을 나란히
+  · 무엇이 나왔는가   산출물은 8080에서 따로 뜬다
+
+만드는 것(이 화면)과 만들어진 것(산출물)은 서로 다른 compose다.
 """
 
 import os
+import time
 
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 APP_URL = os.environ.get("APP_URL", "http://localhost:8000")
 ARTIFACT_URL = "http://localhost:8080"
 
 STATUS_LABEL = {"idle": "대기", "running": "실행 중", "done": "완료", "failed": "실패",
                 "approval_needed": "승인 대기", "stopped": "중단됨"}
+AGENT_ICON = {"planner": "🧭", "gate": "💰", "backend": "⚙️", "frontend": "🎨",
+              "tests": "🧪", "integrator": "🔗", "fixer": "🩹"}
 
 st.set_page_config(page_title="coding-agent — 진행 대시보드", page_icon="🛠️", layout="wide")
 
@@ -30,9 +39,9 @@ with st.sidebar:
                                  "sequential": "순차 (v0.1)"}.get)
     budget = st.number_input("비용 상한 ($)", min_value=0.0, max_value=5.0,
                              value=0.02, step=0.005, format="%.3f")
-    started = st.button("에이전트 실행", type="primary", use_container_width=True,
-                        disabled=state == "running")
-    if started:
+
+    if st.button("에이전트 실행", type="primary", use_container_width=True,
+                 disabled=state in ("running", "approval_needed")):
         requests.post(f"{APP_URL}/run",
                       json={"spec": spec, "mode": mode, "budget_usd": budget}, timeout=30)
         st.rerun()
@@ -41,21 +50,25 @@ with st.sidebar:
         requests.post(f"{APP_URL}/stop", timeout=120)
         st.rerun()
 
+    follow = st.checkbox("자동 새로고침", value=state in ("running", "approval_needed"))
+
     st.divider()
     st.caption(f"docker {health['docker']} · {health['git']}")
-    if state == "running":
-        st.caption("실행 중입니다. 새로고침하면 진행이 갱신됩니다.")
+    st.caption("산출물은 별도 compose로 8080에서 뜹니다")
 
 st.title("🛠️ coding-agent 진행 대시보드")
-left, middle, right = st.columns(3)
-left.metric("상태", STATUS_LABEL.get(state, state),
-            {"parallel": "병렬", "sequential": "순차"}.get(status.get("mode", ""), ""))
-middle.metric("경과", f"{status.get('elapsed_s', 0)}초")
+
 cost = status.get("cost", {})
 estimate_total = status.get("estimate", {}).get("total_usd")
-right.metric("누적 비용", f"${cost.get('cost_usd', 0):.4f}",
-             f"{cost.get('calls', 0)}회 호출"
-             + (f" · 추정 ${estimate_total:.4f}" if estimate_total else ""))
+columns = st.columns(4)
+columns[0].metric("상태", STATUS_LABEL.get(state, state),
+                  {"parallel": "병렬", "sequential": "순차"}.get(status.get("mode", ""), ""))
+columns[1].metric("경과", f"{status.get('elapsed_s', 0)}초")
+columns[2].metric("실측 비용", f"${cost.get('cost_usd', 0):.4f}",
+                  f"추정 ${estimate_total:.4f}" if estimate_total
+                  else f"{cost.get('calls', 0)}회 호출")
+columns[3].metric("복구", f"수정 {status.get('fix_rounds', 0)}회",
+                  f"재계획 {status.get('replans', 0)}회")
 
 if state == "approval_needed":
     estimate = status.get("estimate", {})
@@ -78,9 +91,13 @@ tasks = status.get("tasks", [])
 if not tasks:
     st.caption("아직 없습니다. 왼쪽에서 실행하십시오.")
 else:
-    st.table([{"역할": t["role"], "제목": t["title"], "난이도": t["difficulty"],
-               "모델": t.get("model", "") or "-", "브랜치": t["branch"],
-               "상태": t["status"], "커밋": t.get("sha", "") or "-"} for t in tasks])
+    st.table([{"역할": f"{AGENT_ICON.get(task['role'], '')} {task['role']}",
+               "제목": task["title"], "난이도": task["difficulty"],
+               "모델": (task.get("model") or "-").split("/")[-1],
+               "브랜치": task["branch"], "상태": task["status"],
+               "구간": (f"{task['started_s']:.1f}s → {task['ended_s']:.1f}s"
+                        if task.get("ended_s") is not None else "-"),
+               "커밋": task.get("sha", "") or "-"} for task in tasks])
 
 columns = st.columns(2)
 with columns[0]:
@@ -90,14 +107,18 @@ with columns[0]:
 
 with columns[1]:
     st.subheader("무슨 일이 일어났나")
-    for event in status.get("events", [])[-14:]:
-        st.caption(f"**{event['agent']}** · {event['action']}")
+    for event in status.get("events", [])[-16:]:
+        st.caption(f"{AGENT_ICON.get(event['agent'], '·')} **{event['agent']}** · {event['action']}")
         if event.get("detail"):
-            st.caption(f"　{event['detail'][:160]}")
+            st.caption(f"　{event['detail'][:200]}")
 
 st.divider()
 if status.get("artifact_alive"):
     st.success(f"산출물이 떠 있습니다 → {ARTIFACT_URL}")
-    st.caption("만드는 것(이 화면)과 만들어진 것(산출물)은 서로 다른 compose입니다.")
+    components.iframe(ARTIFACT_URL, height=420)
 else:
     st.info("산출물은 아직 떠 있지 않습니다.")
+
+if follow and state in ("running", "approval_needed"):
+    time.sleep(3)
+    st.rerun()

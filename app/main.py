@@ -17,7 +17,7 @@ from agent.workspace import Project
 
 SPEC_DIR = "/app/specs"
 
-app = FastAPI(title="coding-agent", version="0.4")
+app = FastAPI(title="coding-agent", version="1.0")
 _lock = threading.Lock()
 _thread: threading.Thread | None = None
 
@@ -86,9 +86,10 @@ def approve(body: ApproveRequest) -> dict:
 
 @app.get("/status")
 def status() -> dict:
+    project = Project()
     state = Project.load_status()
-    state["artifact_alive"] = Project().artifact_alive()
-    state["graph"] = Project().graph()
+    state["artifact_alive"] = project.artifact_alive()
+    state["graph"] = project.graph()
     return state
 
 
