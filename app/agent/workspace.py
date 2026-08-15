@@ -125,7 +125,10 @@ class Project:
         return True, "\n".join(logs)
 
     def graph(self, limit: int = 20) -> str:
-        return self.git("log", "--graph", "--oneline", "--all", f"-{limit}")[1]
+        # --decorate는 파이프로 나갈 때 기본이 꺼진다. 브랜치 이름이 보여야
+        # "누가 어느 가지에서 짰는지"가 읽힌다.
+        return self.git("log", "--graph", "--oneline", "--all", "--decorate=short",
+                        f"-{limit}")[1]
 
     # ── worktree: 병렬로 짜려면 작업 트리가 따로 있어야 한다 (v0.2) ──
     #
