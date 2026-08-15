@@ -12,19 +12,19 @@ import threading
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from agent import sequential
+from agent import graph as parallel, sequential
 from agent.workspace import Project
 
 SPEC_DIR = "/app/specs"
 
-app = FastAPI(title="coding-agent", version="0.1")
+app = FastAPI(title="coding-agent", version="0.2")
 _lock = threading.Lock()
 _thread: threading.Thread | None = None
 
 
 class RunRequest(BaseModel):
     spec: str = "todo"
-    mode: str = "sequential"
+    mode: str = "parallel"      # parallel | sequential
 
 
 @app.get("/health")
@@ -58,7 +58,8 @@ def run(body: RunRequest) -> dict:
         if _thread and _thread.is_alive():
             return {"started": False, "why": "이미 실행 중입니다"}
         spec = read_spec(body.spec)
-        _thread = threading.Thread(target=sequential.run, args=(spec,), daemon=True)
+        runner = sequential.run if body.mode == "sequential" else parallel.run
+        _thread = threading.Thread(target=runner, args=(spec,), daemon=True)
         _thread.start()
     return {"started": True, "spec": body.spec, "mode": body.mode}
 
